@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-import todo
+from . import todo
 
 blueprints = [
     todo.todo_bp
