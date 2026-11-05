@@ -1,0 +1,60 @@
+name: Flask native CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FLASK_APP: manage:app
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+      - name: Validate Python code
+        run: python -m compileall -q application manage.py tests
+      - name: Test application and SQLite
+        run: python -m unittest discover -s tests -v
+      - name: Initialize SQLite database
+        run: |
+          rm -f todo.sqlite
+          python -m flask db upgrade
+          python -m flask db current
+      - name: Smoke test Flask server
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m flask run --host=127.0.0.1 --port=7345 > flask-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; cat flask-server.log' EXIT
+          ready=false
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:7345/ -o response.html; then
+              ready=true
+              break
+            fi
+            kill -0 "$server_pid"
+            sleep 1
+          done
+          test "$ready" = true
+          grep -q 'TODO Lists' response.html
+          curl --fail --silent --show-error --max-time 5 -i http://127.0.0.1:7345/
+          echo 'Smoke test passed: Flask returned HTTP 200 and the TODO page.'
